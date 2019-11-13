@@ -7,7 +7,7 @@
  * Copyright 2013- Alan Hong. and other contributors
  * summernote may be freely distributed under the MIT license.
  * 
- * Date: 2019-07-30T07:32Z
+ * Date: 2019-11-13T14:57Z
  * 
  */
 (function webpackUniversalModuleDefinition(root, factory) {
@@ -268,7 +268,8 @@ external_jQuery_default.a.extend(external_jQuery_default.a.summernote.lang, {
       edit: 'Edit',
       textToDisplay: 'Text to display',
       url: 'To what URL should this link go?',
-      openInNewWindow: 'Open in new window'
+      openInNewWindow: 'Open in new window',
+      useProtocol: 'Use default protocol'
     },
     table: {
       table: 'Table',
@@ -317,7 +318,7 @@ external_jQuery_default.a.extend(external_jQuery_default.a.summernote.lang, {
       recent: 'Recent Color',
       more: 'More Color',
       background: 'Background Color',
-      foreground: 'Foreground Color',
+      foreground: 'Text Color',
       transparent: 'Transparent',
       setTransparent: 'Set transparent',
       reset: 'Reset',
@@ -352,7 +353,7 @@ external_jQuery_default.a.extend(external_jQuery_default.a.summernote.lang, {
       'insertOrderedList': 'Toggle ordered list',
       'outdent': 'Outdent on current paragraph',
       'indent': 'Indent on current paragraph',
-      'formatPara': 'Change current block\'s format as a paragraph(P tag)',
+      'formatPara': 'Change current block\'s format as a Paragraph',
       'formatH1': 'Change current block\'s format as H1',
       'formatH2': 'Change current block\'s format as H2',
       'formatH3': 'Change current block\'s format as H3',
@@ -369,6 +370,9 @@ external_jQuery_default.a.extend(external_jQuery_default.a.summernote.lang, {
     specialChar: {
       specialChar: 'SPECIAL CHARACTERS',
       select: 'Select Special characters'
+    },
+    output: {
+      noSelection: 'No Selection Made!'
     }
   }
 });
@@ -456,6 +460,7 @@ const inputEventName = isMSIE || isEdge ? 'DOMCharacterDataModified DOMSubtreeMo
   validFontName
 });
 // CONCATENATED MODULE: ./src/js/base/core/func.js
+
 /**
  * @class core.func
  *
@@ -464,6 +469,7 @@ const inputEventName = isMSIE || isEdge ? 'DOMCharacterDataModified DOMSubtreeMo
  * @singleton
  * @alternateClassName func
  */
+
 function eq(itemA) {
   return function (itemB) {
     return itemA === itemB;
@@ -537,7 +543,7 @@ function uniqueId(prefix) {
 
 
 function rect2bnd(rect) {
-  const $document = $(document);
+  const $document = external_jQuery_default()(document);
   return {
     top: rect.top + $document.scrollTop(),
     left: rect.left + $document.scrollLeft(),
@@ -2198,6 +2204,7 @@ class Context_Context {
     this.layoutInfo.editable.attr('contenteditable', true);
     this.invoke('toolbar.activate', true);
     this.triggerEvent('disable', false);
+    this.options.editing = true;
   }
 
   disable() {
@@ -2207,6 +2214,7 @@ class Context_Context {
     }
 
     this.layoutInfo.editable.attr('contenteditable', false);
+    this.options.editing = false;
     this.invoke('toolbar.deactivate', true);
     this.triggerEvent('disable', true);
   }
@@ -2864,15 +2872,17 @@ class range_WrappedRange {
       }
     } else {
       topAncestor = rng.sc.childNodes[rng.so > 0 ? rng.so - 1 : 0];
-    } // siblings not in paragraph
+    }
 
+    if (topAncestor) {
+      // siblings not in paragraph
+      let inlineSiblings = dom.listPrev(topAncestor, dom.isParaInline).reverse();
+      inlineSiblings = inlineSiblings.concat(dom.listNext(topAncestor.nextSibling, dom.isParaInline)); // wrap with paragraph
 
-    let inlineSiblings = dom.listPrev(topAncestor, dom.isParaInline).reverse();
-    inlineSiblings = inlineSiblings.concat(dom.listNext(topAncestor.nextSibling, dom.isParaInline)); // wrap with paragraph
-
-    if (inlineSiblings.length) {
-      const para = dom.wrap(lists.head(inlineSiblings), 'p');
-      dom.appendChildNodes(para, lists.tail(inlineSiblings));
+      if (inlineSiblings.length) {
+        const para = dom.wrap(lists.head(inlineSiblings), 'p');
+        dom.appendChildNodes(para, lists.tail(inlineSiblings));
+      }
     }
 
     return this.normalize();
@@ -3213,7 +3223,12 @@ const KEY_MAP = {
   'SLASH': 191,
   'LEFTBRACKET': 219,
   'BACKSLASH': 220,
-  'RIGHTBRACKET': 221
+  'RIGHTBRACKET': 221,
+  // Navigation
+  'HOME': 36,
+  'END': 35,
+  'PAGEUP': 33,
+  'PAGEDOWN': 34
 };
 /**
  * @class core.key
@@ -3243,6 +3258,16 @@ const KEY_MAP = {
    */
   isMove: keyCode => {
     return lists.contains([KEY_MAP.LEFT, KEY_MAP.UP, KEY_MAP.RIGHT, KEY_MAP.DOWN], keyCode);
+  },
+
+  /**
+   * @method isNavigation
+   *
+   * @param {Number} keyCode
+   * @return {Boolean}
+   */
+  isNavigation: keyCode => {
+    return lists.contains([KEY_MAP.HOME, KEY_MAP.END, KEY_MAP.PAGEUP, KEY_MAP.PAGEDOWN], keyCode);
   },
 
   /**
@@ -4842,6 +4867,7 @@ class Editor_Editor {
       let linkUrl = linkInfo.url;
       const linkText = linkInfo.text;
       const isNewWindow = linkInfo.isNewWindow;
+      const checkProtocol = linkInfo.checkProtocol;
       let rng = linkInfo.range || this.getLastRange();
       const additionalTextLength = linkText.length - rng.toString().length;
 
@@ -4857,9 +4883,9 @@ class Editor_Editor {
 
       if (this.options.onCreateLink) {
         linkUrl = this.options.onCreateLink(linkUrl);
-      } else {
+      } else if (checkProtocol) {
         // if url doesn't have any protocol and not even a relative or a label, use http:// as default
-        linkUrl = /^([A-Za-z][A-Za-z0-9+-.]*\:|#|\/)/.test(linkUrl) ? linkUrl : 'http://' + linkUrl;
+        linkUrl = /^([A-Za-z][A-Za-z0-9+-.]*\:|#|\/)/.test(linkUrl) ? linkUrl : this.options.defaultProtocol + linkUrl;
       }
 
       let anchors = [];
@@ -4940,8 +4966,8 @@ class Editor_Editor {
     this.removeMedia = this.wrapCommand(() => {
       let $target = external_jQuery_default()(this.restoreTarget()).parent();
 
-      if ($target.parent('figure').length) {
-        $target.parent('figure').remove();
+      if ($target.closest('figure').length) {
+        $target.closest('figure').remove();
       } else {
         $target = external_jQuery_default()(this.restoreTarget()).detach();
       }
@@ -4998,7 +5024,11 @@ class Editor_Editor {
       }
 
       if (this.isLimited(1, event)) {
-        return false;
+        const lastRange = this.getLastRange();
+
+        if (lastRange.eo - lastRange.so === 0) {
+          return false;
+        }
       }
     }).on('keyup', event => {
       this.setLastRange();
@@ -5019,7 +5049,13 @@ class Editor_Editor {
       this.setLastRange();
       this.context.triggerEvent('paste', event);
     });
-    this.$editable.attr('spellcheck', this.options.spellCheck); // init content before set event
+    this.$editable.attr('spellcheck', this.options.spellCheck);
+    this.$editable.attr('autocorrect', this.options.spellCheck);
+
+    if (this.options.disableGrammar) {
+      this.$editable.attr('data-gramm', false);
+    } // init content before set event
+
 
     this.$editable.html(dom.html(this.$note) || dom.emptyPara);
     this.$editable.on(env.inputEventName, func.debounce(() => {
@@ -5079,14 +5115,16 @@ class Editor_Editor {
       keys.push(keyName);
     }
 
-    const eventName = keyMap[keys.join('+')];
+    if (keyName === 'TAB' && !this.options.tabDisable) {
+      const eventName = keyMap[keys.join('+')];
 
-    if (eventName) {
-      if (this.context.invoke(eventName) !== false) {
-        event.preventDefault();
+      if (eventName) {
+        if (this.context.invoke(eventName) !== false) {
+          event.preventDefault();
+        }
+      } else if (core_key.isEdit(event.keyCode)) {
+        this.afterCommand();
       }
-    } else if (core_key.isEdit(event.keyCode)) {
-      this.afterCommand();
     }
   }
 
@@ -5101,13 +5139,13 @@ class Editor_Editor {
     pad = pad || 0;
 
     if (typeof event !== 'undefined') {
-      if (core_key.isMove(event.keyCode) || event.ctrlKey || event.metaKey || lists.contains([core_key.code.BACKSPACE, core_key.code.DELETE], event.keyCode)) {
+      if (core_key.isMove(event.keyCode) || core_key.isNavigation(event.keyCode) || event.ctrlKey || event.metaKey || lists.contains([core_key.code.BACKSPACE, core_key.code.DELETE], event.keyCode)) {
         return false;
       }
     }
 
     if (this.options.maxTextLength > 0) {
-      if (this.$editable.text().length + pad >= this.options.maxTextLength) {
+      if (this.$editable.text().length + pad > this.options.maxTextLength) {
         return true;
       }
     }
@@ -5421,8 +5459,9 @@ class Editor_Editor {
   fontStyling(target, value) {
     const rng = this.getLastRange();
 
-    if (rng) {
+    if (rng !== '') {
       const spans = this.style.styleNodes(rng);
+      this.$editor.find('.note-status-output').html('');
       external_jQuery_default()(spans).css(target, value); // [workaround] added styled bogus span for style
       //  - also bogus character needed for cursor position
 
@@ -5436,6 +5475,12 @@ class Editor_Editor {
           this.$editable.data(KEY_BOGUS, firstSpan);
         }
       }
+    } else {
+      const noteStatusOutput = external_jQuery_default.a.now();
+      this.$editor.find('.note-status-output').html('<div id="note-status-output-' + noteStatusOutput + '" class="alert alert-info">' + this.lang.output.noSelection + '</div>');
+      setTimeout(function () {
+        external_jQuery_default()('#note-status-output-' + noteStatusOutput).remove();
+      }, 5000);
     }
   }
   /**
@@ -5631,14 +5676,20 @@ class Clipboard_Clipboard {
     const clipboardData = event.originalEvent.clipboardData;
 
     if (clipboardData && clipboardData.items && clipboardData.items.length) {
-      // paste img file
       const item = clipboardData.items.length > 1 ? clipboardData.items[1] : lists.head(clipboardData.items);
 
       if (item.kind === 'file' && item.type.indexOf('image/') !== -1) {
+        // paste img file
         this.context.invoke('editor.insertImagesOrCallback', [item.getAsFile()]);
+        this.context.invoke('editor.afterCommand');
+      } else if (item.kind === 'string') {
+        // paste text with maxTextLength check
+        if (this.context.invoke('editor.isLimited', clipboardData.getData('Text').length)) {
+          event.preventDefault();
+        } else {
+          this.context.invoke('editor.afterCommand');
+        }
       }
-
-      this.context.invoke('editor.afterCommand');
     }
   }
 
@@ -5654,11 +5705,7 @@ class Dropzone_Dropzone {
     this.options = context.options;
     this.lang = this.options.langInfo;
     this.documentEventHandlers = {};
-    this.$dropzone = external_jQuery_default()(['<div class="note-dropzone">', '  <div class="note-dropzone-message"/>', '</div>'].join('')).prependTo(this.$editor);
-  }
-
-  shouldInitialize() {
-    return !this.options.disableDragAndDrop;
+    this.$dropzone = external_jQuery_default()(['<div class="note-dropzone">', '<div class="note-dropzone-message"/>', '</div>'].join('')).prependTo(this.$editor);
   }
   /**
    * attach Drag and Drop Events
@@ -5666,7 +5713,18 @@ class Dropzone_Dropzone {
 
 
   initialize() {
-    this.attachDragAndDropEvent();
+    if (this.options.disableDragAndDrop) {
+      // prevent default drop event
+      this.documentEventHandlers.onDrop = e => {
+        e.preventDefault();
+      }; // do not consider outside of dropzone
+
+
+      this.$eventListener = this.$dropzone;
+      this.$eventListener.on('drop', this.documentEventHandlers.onDrop);
+    } else {
+      this.attachDragAndDropEvent();
+    }
   }
   /**
    * attach Drag and Drop Events
@@ -6135,7 +6193,7 @@ class Handle_Handle {
 
 
 const defaultScheme = 'http://';
-const linkPattern = /^([A-Za-z][A-Za-z0-9+-.]*\:[\/]{2}|mailto:[A-Z0-9._%+-]+@)?(www\.)?(.+)$/i;
+const linkPattern = /^([A-Za-z][A-Za-z0-9+-.]*\:[\/]{2}|tel:|mailto:[A-Z0-9._%+-]+@)?(www\.)?(.+)$/i;
 class AutoLink_AutoLink {
   constructor(context) {
     this.context = context;
@@ -6169,7 +6227,8 @@ class AutoLink_AutoLink {
 
     if (match && (match[1] || match[2])) {
       const link = match[1] ? keyword : defaultScheme + keyword;
-      const node = external_jQuery_default()('<a />').html(keyword).attr('href', link)[0];
+      const urlText = keyword.replace(/^(?:https?:\/\/)?(?:tel?:?)?(?:mailto?:?)?(?:www\.)?/i, '').split('/')[0];
+      const node = external_jQuery_default()('<a />').html(urlText).attr('href', link)[0];
 
       if (this.context.options.linkTargetBlank) {
         external_jQuery_default()(node).attr('target', '_blank');
@@ -6457,7 +6516,8 @@ class Buttons_Buttons {
           toggle: 'dropdown'
         }
       }), this.ui.dropdown({
-        items: (backColor ? ['<div class="note-palette">', '  <div class="note-palette-title">' + this.lang.color.background + '</div>', '  <div>', '    <button type="button" class="note-color-reset btn btn-light" data-event="backColor" data-value="inherit">', this.lang.color.transparent, '    </button>', '  </div>', '  <div class="note-holder" data-event="backColor"/>', '  <div>', '    <button type="button" class="note-color-select btn" data-event="openPalette" data-value="backColorPicker">', this.lang.color.cpSelect, '    </button>', '    <input type="color" id="backColorPicker" class="note-btn note-color-select-btn" value="' + this.options.colorButton.backColor + '" data-event="backColorPalette">', '  </div>', '  <div class="note-holder-custom" id="backColorPalette" data-event="backColor"/>', '</div>'].join('') : '') + (foreColor ? ['<div class="note-palette">', '  <div class="note-palette-title">' + this.lang.color.foreground + '</div>', '  <div>', '    <button type="button" class="note-color-reset btn btn-light" data-event="removeFormat" data-value="foreColor">', this.lang.color.resetToDefault, '    </button>', '  </div>', '  <div class="note-holder" data-event="foreColor"/>', '  <div>', '    <button type="button" class="note-color-select btn" data-event="openPalette" data-value="foreColorPicker">', this.lang.color.cpSelect, '    </button>', '    <input type="color" id="foreColorPicker" class="note-btn note-color-select-btn" value="' + this.options.colorButton.foreColor + '" data-event="foreColorPalette">', '  <div class="note-holder-custom" id="foreColorPalette" data-event="foreColor"/>', '</div>'].join('') : ''),
+        items: (backColor ? ['<div class="note-palette">', '<div class="note-palette-title">' + this.lang.color.background + '</div>', '<div>', '<button type="button" class="note-color-reset btn btn-light" data-event="backColor" data-value="inherit">', this.lang.color.transparent, '</button>', '</div>', '<div class="note-holder" data-event="backColor"/>', '<div>', '<button type="button" class="note-color-select btn" data-event="openPalette" data-value="backColorPicker">', this.lang.color.cpSelect, '</button>', '<input type="color" id="backColorPicker" class="note-btn note-color-select-btn" value="' + this.options.colorButton.backColor + '" data-event="backColorPalette">', '</div>', '<div class="note-holder-custom" id="backColorPalette" data-event="backColor"/>', '</div>'].join('') : '') + (foreColor ? ['<div class="note-palette">', '<div class="note-palette-title">' + this.lang.color.foreground + '</div>', '<div>', '<button type="button" class="note-color-reset btn btn-light" data-event="removeFormat" data-value="foreColor">', this.lang.color.resetToDefault, '</button>', '</div>', '<div class="note-holder" data-event="foreColor"/>', '<div>', '<button type="button" class="note-color-select btn" data-event="openPalette" data-value="foreColorPicker">', this.lang.color.cpSelect, '</button>', '<input type="color" id="foreColorPicker" class="note-btn note-color-select-btn" value="' + this.options.colorButton.foreColor + '" data-event="foreColorPalette">', '</div>', // Fix missing Div, Commented to find easily if it's wrong
+        '<div class="note-holder-custom" id="foreColorPalette" data-event="foreColor"/>', '</div>'].join('') : ''),
         callback: $dropdown => {
           $dropdown.find('.note-holder').each((idx, item) => {
             const $holder = external_jQuery_default()(item);
@@ -6493,7 +6553,7 @@ class Buttons_Buttons {
         },
         click: event => {
           event.stopPropagation();
-          const $parent = external_jQuery_default()('.' + className);
+          const $parent = external_jQuery_default()('.' + className).find('.show');
           const $button = external_jQuery_default()(event.target);
           const eventName = $button.data('event');
           let value = $button.attr('data-value');
@@ -6771,7 +6831,7 @@ class Buttons_Buttons {
       }), this.ui.dropdown({
         title: this.lang.table.table,
         className: 'note-table',
-        items: ['<div class="note-dimension-picker">', '  <div class="note-dimension-picker-mousecatcher" data-event="insertTable" data-value="1x1"/>', '  <div class="note-dimension-picker-highlighted"/>', '  <div class="note-dimension-picker-unhighlighted"/>', '</div>', '<div class="note-dimension-display">1 x 1</div>'].join('')
+        items: ['<div class="note-dimension-picker">', '<div class="note-dimension-picker-mousecatcher" data-event="insertTable" data-value="1x1"/>', '<div class="note-dimension-picker-highlighted"/>', '<div class="note-dimension-picker-unhighlighted"/>', '</div>', '<div class="note-dimension-display">1 x 1</div>'].join('')
       })], {
         callback: $node => {
           const $catcher = $node.find('.note-dimension-picker-mousecatcher');
@@ -7251,7 +7311,9 @@ class Toolbar_Toolbar {
       }
     }
 
-    this.followScroll();
+    if (this.options.followingToolbar) {
+      this.followScroll();
+    }
   }
 
   updateFullscreen(isFullscreen) {
@@ -7273,7 +7335,7 @@ class Toolbar_Toolbar {
     let $btn = this.$toolbar.find('button');
 
     if (!isIncludeCodeview) {
-      $btn = $btn.not('.btn-codeview');
+      $btn = $btn.not('.btn-codeview').not('.btn-fullscreen');
     }
 
     this.ui.toggleBtn($btn, true);
@@ -7283,7 +7345,7 @@ class Toolbar_Toolbar {
     let $btn = this.$toolbar.find('button');
 
     if (!isIncludeCodeview) {
-      $btn = $btn.not('.btn-codeview');
+      $btn = $btn.not('.btn-codeview').not('.btn-fullscreen');
     }
 
     this.ui.toggleBtn($btn, false);
@@ -7308,11 +7370,15 @@ class LinkDialog_LinkDialog {
 
   initialize() {
     const $container = this.options.dialogsInBody ? this.$body : this.$editor;
-    const body = ['<div class="form-group note-form-group">', `<label class="note-form-label">${this.lang.link.textToDisplay}</label>`, '<input class="note-link-text form-control note-form-control note-input" type="text" />', '</div>', '<div class="form-group note-form-group">', `<label class="note-form-label">${this.lang.link.url}</label>`, '<input class="note-link-url form-control note-form-control note-input" type="text" value="http://" />', '</div>', !this.options.disableLinkTarget ? external_jQuery_default()('<div/>').append(this.ui.checkbox({
+    const body = ['<div class="form-group note-form-group">', `<label for="note-dialog-link-txt-${this.options.id}" class="note-form-label">${this.lang.link.textToDisplay}</label>`, `<input id="note-dialog-link-txt-${this.options.id}" class="note-link-text form-control note-form-control note-input" type="text"/>`, '</div>', '<div class="form-group note-form-group">', `<label for="note-dialog-link-url-${this.options.id}" class="note-form-label">${this.lang.link.url}</label>`, `<input id="note-dialog-link-url-${this.options.id}" class="note-link-url form-control note-form-control note-input" type="text" value="http://"/>`, '</div>', !this.options.disableLinkTarget ? external_jQuery_default()('<div/>').append(this.ui.checkbox({
       className: 'sn-checkbox-open-in-new-window',
       text: this.lang.link.openInNewWindow,
       checked: true
-    }).render()).html() : ''].join('');
+    }).render()).html() : '', external_jQuery_default()('<div/>').append(this.ui.checkbox({
+      className: 'sn-checkbox-use-protocol',
+      text: this.lang.link.useProtocol,
+      checked: true
+    }).render()).html()].join('');
     const buttonClass = 'btn btn-primary note-btn note-btn-primary note-link-btn';
     const footer = `<input type="button" href="#" class="${buttonClass}" value="${this.lang.link.insert}" disabled>`;
     this.$dialog = this.ui.dialog({
@@ -7359,6 +7425,7 @@ class LinkDialog_LinkDialog {
       const $linkUrl = this.$dialog.find('.note-link-url');
       const $linkBtn = this.$dialog.find('.note-link-btn');
       const $openInNewWindow = this.$dialog.find('.sn-checkbox-open-in-new-window input[type=checkbox]');
+      const $useProtocol = this.$dialog.find('.sn-checkbox-use-protocol input[type=checkbox]');
       this.ui.onDialogShown(this.$dialog, () => {
         this.context.triggerEvent('dialog.shown'); // If no url was given and given text is valid URL then copy that into URL Field
 
@@ -7391,13 +7458,16 @@ class LinkDialog_LinkDialog {
         this.bindEnterKey($linkText, $linkBtn);
         const isNewWindowChecked = linkInfo.isNewWindow !== undefined ? linkInfo.isNewWindow : this.context.options.linkTargetBlank;
         $openInNewWindow.prop('checked', isNewWindowChecked);
+        const useProtocolChecked = linkInfo.url ? false : this.context.options.useProtocol;
+        $useProtocol.prop('checked', useProtocolChecked);
         $linkBtn.one('click', event => {
           event.preventDefault();
           deferred.resolve({
             range: linkInfo.range,
             url: $linkUrl.val(),
             text: $linkText.val(),
-            isNewWindow: $openInNewWindow.is(':checked')
+            isNewWindow: $openInNewWindow.is(':checked'),
+            checkProtocol: $useProtocol.is(':checked')
           });
           this.ui.hideDialog(this.$dialog);
         });
@@ -7445,7 +7515,7 @@ class LinkPopover_LinkPopover {
       'summernote.keyup summernote.mouseup summernote.change summernote.scroll': () => {
         this.update();
       },
-      'summernote.disable summernote.dialog.shown': () => {
+      'summernote.disable summernote.dialog.shown summernote.blur': () => {
         this.hide();
       }
     };
@@ -7524,7 +7594,7 @@ class ImageDialog_ImageDialog {
       imageLimitation = `<small>${this.lang.image.maximumFileSize + ' : ' + readableSize}</small>`;
     }
 
-    const body = ['<div class="form-group note-form-group note-group-select-from-files">', '<label class="note-form-label">' + this.lang.image.selectFromFiles + '</label>', '<input class="note-image-input form-control-file note-form-control note-input" ', ' type="file" name="files" accept="image/*" multiple="multiple" />', imageLimitation, '</div>', '<div class="form-group note-group-image-url" style="overflow:auto;">', '<label class="note-form-label">' + this.lang.image.url + '</label>', '<input class="note-image-url form-control note-form-control note-input ', ' col-md-12" type="text" />', '</div>'].join('');
+    const body = ['<div class="form-group note-form-group note-group-select-from-files">', '<label for="note-dialog-image-file-' + this.options.id + '" class="note-form-label">' + this.lang.image.selectFromFiles + '</label>', '<input id="note-dialog-image-file-' + this.options.id + '" class="note-image-input form-control-file note-form-control note-input" ', ' type="file" name="files" accept="image/*" multiple="multiple"/>', imageLimitation, '</div>', '<div class="form-group note-group-image-url">', '<label for="note-dialog-image-url-' + this.options.id + '" class="note-form-label">' + this.lang.image.url + '</label>', '<input id="note-dialog-image-url-' + this.options.id + '" class="note-image-url form-control note-form-control note-input" type="text"/>', '</div>'].join('');
     const buttonClass = 'btn btn-primary note-btn note-btn-primary note-image-btn';
     const footer = `<input type="button" href="#" class="${buttonClass}" value="${this.lang.image.insert}" disabled>`;
     this.$dialog = this.ui.dialog({
@@ -7636,7 +7706,7 @@ class ImagePopover_ImagePopover {
     this.editable = context.layoutInfo.editable[0];
     this.options = context.options;
     this.events = {
-      'summernote.disable': () => {
+      'summernote.disable summernote.blur': () => {
         this.hide();
       }
     };
@@ -7694,7 +7764,7 @@ class TablePopover_TablePopover {
       'summernote.keyup summernote.scroll summernote.change': () => {
         this.update();
       },
-      'summernote.disable': () => {
+      'summernote.disable summernote.blur': () => {
         this.hide();
       }
     };
@@ -7762,7 +7832,7 @@ class VideoDialog_VideoDialog {
 
   initialize() {
     const $container = this.options.dialogsInBody ? this.$body : this.$editor;
-    const body = ['<div class="form-group note-form-group row-fluid">', `<label class="note-form-label">${this.lang.video.url} <small class="text-muted">${this.lang.video.providers}</small></label>`, '<input class="note-video-url form-control note-form-control note-input" type="text" />', '</div>'].join('');
+    const body = ['<div class="form-group note-form-group row-fluid">', `<label for="note-dialog-video-url-${this.options.id}" class="note-form-label">${this.lang.video.url} <small class="text-muted">${this.lang.video.providers}</small></label>`, `<input id="note-dialog-video-url-${this.options.id}" class="note-video-url form-control note-form-control note-input" type="text"/>`, '</div>'].join('');
     const buttonClass = 'btn btn-primary note-btn note-btn-primary note-video-btn';
     const footer = `<input type="button" href="#" class="${buttonClass}" value="${this.lang.video.insert}" disabled>`;
     this.$dialog = this.ui.dialog({
@@ -7843,7 +7913,7 @@ class VideoDialog_VideoDialog {
       $video = external_jQuery_default()('<iframe webkitallowfullscreen mozallowfullscreen allowfullscreen>').attr('frameborder', 0).attr('height', '498').attr('width', '510').attr('src', '//player.youku.com/embed/' + youkuMatch[1]);
     } else if (qqMatch && qqMatch[1].length || qqMatch2 && qqMatch2[2].length) {
       const vid = qqMatch && qqMatch[1].length ? qqMatch[1] : qqMatch2[2];
-      $video = external_jQuery_default()('<iframe webkitallowfullscreen mozallowfullscreen allowfullscreen>').attr('frameborder', 0).attr('height', '310').attr('width', '500').attr('src', 'http://v.qq.com/iframe/player.html?vid=' + vid + '&amp;auto=0');
+      $video = external_jQuery_default()('<iframe webkitallowfullscreen mozallowfullscreen allowfullscreen>').attr('frameborder', 0).attr('height', '310').attr('width', '500').attr('src', 'https://v.qq.com/iframe/player.html?vid=' + vid + '&amp;auto=0');
     } else if (mp4Match || oggMatch || webmMatch) {
       $video = external_jQuery_default()('<video controls>').attr('src', url).attr('width', '640').attr('height', '360');
     } else if (fbMatch && fbMatch[0].length) {
@@ -7957,7 +8027,7 @@ class HelpDialog_HelpDialog {
       const command = keyMap[key];
       const $row = external_jQuery_default()('<div><div class="help-list-item"/></div>');
       $row.append(external_jQuery_default()('<label><kbd>' + key + '</kdb></label>').css({
-        'width': 180,
+        'width': 170,
         'margin-right': 10
       })).append(external_jQuery_default()('<span/>').html(this.context.memo('help.' + command) || command));
       return $row.html();
@@ -8002,9 +8072,11 @@ class AirPopover_AirPopover {
     this.options = context.options;
     this.events = {
       'summernote.keyup summernote.mouseup summernote.scroll': () => {
-        this.update();
+        if (this.options.editing) {
+          this.update();
+        }
       },
-      'summernote.disable summernote.change summernote.dialog.shown': () => {
+      'summernote.disable summernote.change summernote.dialog.shown summernote.blur': () => {
         this.hide();
       },
       'summernote.focusout': (we, e) => {
@@ -8088,7 +8160,7 @@ class HintPopover_HintPopover {
       'summernote.keydown': (we, e) => {
         this.handleKeydown(e);
       },
-      'summernote.disable summernote.dialog.shown': () => {
+      'summernote.disable summernote.dialog.shown summernote.blur': () => {
         this.hide();
       }
     };
@@ -8323,6 +8395,8 @@ external_jQuery_default.a.summernote = external_jQuery_default.a.extend(external
   lists: lists,
   options: {
     langInfo: external_jQuery_default.a.summernote.lang['en-US'],
+    id: external_jQuery_default.a.now(),
+    editing: true,
     modules: {
       'editor': Editor_Editor,
       'clipboard': Clipboard_Clipboard,
@@ -8352,6 +8426,7 @@ external_jQuery_default.a.summernote = external_jQuery_default.a.extend(external
     buttons: {},
     lang: 'en-US',
     followingToolbar: false,
+    toolbarPosition: 'top',
     otherStaticBar: '',
     // toolbar
     toolbar: [['style', ['style']], ['font', ['bold', 'underline', 'clear']], ['fontname', ['fontname']], ['color', ['color']], ['para', ['ul', 'ol', 'paragraph']], ['table', ['table']], ['insert', ['link', 'picture', 'video']], ['view', ['fullscreen', 'codeview', 'help']]],
@@ -8361,14 +8436,17 @@ external_jQuery_default.a.summernote = external_jQuery_default.a.extend(external
       image: [['resize', ['resizeFull', 'resizeHalf', 'resizeQuarter', 'resizeNone']], ['float', ['floatLeft', 'floatRight', 'floatNone']], ['remove', ['removeMedia']]],
       link: [['link', ['linkDialogShow', 'unlink']]],
       table: [['add', ['addRowDown', 'addRowUp', 'addColLeft', 'addColRight']], ['delete', ['deleteRow', 'deleteCol', 'deleteTable']]],
-      air: [['color', ['color']], ['font', ['bold', 'underline', 'clear']], ['para', ['ul', 'paragraph']], ['table', ['table']], ['insert', ['link', 'picture']]]
+      air: [['color', ['color']], ['font', ['bold', 'underline', 'clear']], ['para', ['ul', 'paragraph']], ['table', ['table']], ['insert', ['link', 'picture']], ['view', ['fullscreen', 'codeview']]]
     },
     // air mode: inline editor
     airMode: false,
     width: null,
     height: null,
     linkTargetBlank: true,
+    useProtocol: true,
+    defaultProtocol: 'http://',
     focus: false,
+    tabDisabled: false,
     tabSize: 4,
     styleWithSpan: true,
     shortcuts: true,
@@ -8379,6 +8457,7 @@ external_jQuery_default.a.summernote = external_jQuery_default.a.extend(external
     maxTextLength: 0,
     blockquoteBreakingLevel: 2,
     spellCheck: true,
+    disableGrammar: false,
     placeholder: null,
     inheritPlaceholder: false,
     styleTags: ['p', 'blockquote', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
@@ -8573,11 +8652,11 @@ var renderer = __webpack_require__(1);
 const editor = renderer["a" /* default */].create('<div class="note-editor note-frame card"/>');
 const toolbar = renderer["a" /* default */].create('<div class="note-toolbar card-header" role="toolbar"></div>');
 const editingArea = renderer["a" /* default */].create('<div class="note-editing-area"/>');
-const codable = renderer["a" /* default */].create('<textarea class="note-codable" role="textbox" aria-multiline="true"/>');
+const codable = renderer["a" /* default */].create('<textarea class="note-codable" aria-multiline="true"/>');
 const editable = renderer["a" /* default */].create('<div class="note-editable card-block" contentEditable="true" role="textbox" aria-multiline="true"/>');
-const statusbar = renderer["a" /* default */].create(['<output class="note-status-output" aria-live="polite"/>', '<div class="note-statusbar" role="status">', '  <output class="note-status-output" aria-live="polite"></output>', '  <div class="note-resizebar" role="seperator" aria-orientation="horizontal" aria-label="Resize">', '    <div class="note-icon-bar"/>', '    <div class="note-icon-bar"/>', '    <div class="note-icon-bar"/>', '  </div>', '</div>'].join(''));
-const airEditor = renderer["a" /* default */].create('<div class="note-editor"/>');
-const airEditable = renderer["a" /* default */].create(['<div class="note-editable" contentEditable="true" role="textbox" aria-multiline="true"/>', '<output class="note-status-output" aria-live="polite"/>'].join(''));
+const statusbar = renderer["a" /* default */].create(['<output class="note-status-output" role="status" aria-live="polite"/>', '<div class="note-statusbar" role="status">', '<output class="note-status-output" aria-live="polite"></output>', '<div class="note-resizebar" aria-label="Resize">', '<div class="note-icon-bar"/>', '<div class="note-icon-bar"/>', '<div class="note-icon-bar"/>', '</div>', '</div>'].join(''));
+const airEditor = renderer["a" /* default */].create('<div class="note-editor note-airframe"/>');
+const airEditable = renderer["a" /* default */].create(['<div class="note-editable" contentEditable="true" role="textbox" aria-multiline="true"/>', '<output class="note-status-output" role="status" aria-live="polite"/>'].join(''));
 const buttonGroup = renderer["a" /* default */].create('<div class="note-btn-group btn-group">');
 const dropdown = renderer["a" /* default */].create('<div class="note-dropdown-menu dropdown-menu" role="list">', function ($node, options) {
   const markup = Array.isArray(options.items) ? options.items.map(function (item) {
@@ -8643,9 +8722,9 @@ const dialog = renderer["a" /* default */].create('<div class="modal" aria-hidde
   $node.attr({
     'aria-label': options.title
   });
-  $node.html(['<div class="modal-dialog">', '  <div class="modal-content">', options.title ? '    <div class="modal-header">' + '      <h4 class="modal-title">' + options.title + '</h4>' + '      <button type="button" class="close" data-dismiss="modal" aria-label="Close" aria-hidden="true">&times;</button>' + '    </div>' : '', '    <div class="modal-body">' + options.body + '</div>', options.footer ? '    <div class="modal-footer">' + options.footer + '</div>' : '', '  </div>', '</div>'].join(''));
+  $node.html(['<div class="modal-dialog">', '<div class="modal-content">', options.title ? '<div class="modal-header">' + '<h4 class="modal-title">' + options.title + '</h4>' + '<button type="button" class="close" data-dismiss="modal" aria-label="Close" aria-hidden="true">&times;</button>' + '</div>' : '', '<div class="modal-body">' + options.body + '</div>', options.footer ? '<div class="modal-footer">' + options.footer + '</div>' : '', '</div>', '</div>'].join(''));
 });
-const popover = renderer["a" /* default */].create(['<div class="note-popover popover in">', '  <div class="arrow"/>', '  <div class="popover-content note-children-container"/>', '</div>'].join(''), function ($node, options) {
+const popover = renderer["a" /* default */].create(['<div class="note-popover popover in">', '<div class="arrow"/>', '<div class="popover-content note-children-container"/>', '</div>'].join(''), function ($node, options) {
   const direction = typeof options.direction !== 'undefined' ? options.direction : 'bottom';
   $node.addClass(direction);
 
@@ -8654,7 +8733,7 @@ const popover = renderer["a" /* default */].create(['<div class="note-popover po
   }
 });
 const ui_checkbox = renderer["a" /* default */].create('<div class="form-check"></div>', function ($node, options) {
-  $node.html(['<label class="form-check-label"' + (options.id ? ' for="' + options.id + '"' : '') + '>', ' <input role="checkbox" type="checkbox" class="form-check-input"' + (options.id ? ' id="' + options.id + '"' : ''), options.checked ? ' checked' : '', ' aria-label="' + (options.text ? options.text : '') + '"', ' aria-checked="' + (options.checked ? 'true' : 'false') + '"/>', ' ' + (options.text ? options.text : '') + '</label>'].join(''));
+  $node.html(['<label class="form-check-label"' + (options.id ? ' for="note-' + options.id + '"' : '') + '>', '<input type="checkbox" class="form-check-input"' + (options.id ? ' id="note-' + options.id + '"' : ''), options.checked ? ' checked' : '', ' aria-label="' + (options.text ? options.text : '') + '"', ' aria-checked="' + (options.checked ? 'true' : 'false') + '"/>', ' ' + (options.text ? options.text : '') + '</label>'].join(''));
 });
 
 const icon = function (iconClassName, tagName) {
@@ -8682,7 +8761,7 @@ const ui = {
   checkbox: ui_checkbox,
   options: {},
   button: function ($node, options) {
-    return renderer["a" /* default */].create('<button type="button" class="note-btn btn btn-light btn-sm" role="button" tabindex="-1">', function ($node, options) {
+    return renderer["a" /* default */].create('<button type="button" class="note-btn btn btn-light btn-sm" tabindex="-1">', function ($node, options) {
       if (options && options.tooltip) {
         $node.attr({
           title: options.tooltip,
@@ -8717,7 +8796,7 @@ const ui = {
     $dialog.modal('hide');
   },
   createLayout: function ($note, options) {
-    const $editor = (options.airMode ? ui.airEditor([ui.editingArea([ui.airEditable()])]) : ui.editor([ui.toolbar(), ui.editingArea([ui.codable(), ui.editable()]), ui.statusbar()])).render();
+    const $editor = (options.airMode ? ui.airEditor([ui.editingArea([ui.codable(), ui.airEditable()])]) : options.toolbarPosition === 'bottom' ? ui.editor([ui.editingArea([ui.codable(), ui.editable()]), ui.toolbar(), ui.statusbar()]) : ui.editor([ui.toolbar(), ui.editingArea([ui.codable(), ui.editable()]), ui.statusbar()])).render();
     $editor.insertAfter($note);
     return {
       note: $note,
@@ -8748,7 +8827,8 @@ var summernote_bs4 = __webpack_require__(5);
 
 
 external_jQuery_default.a.summernote = external_jQuery_default.a.extend(external_jQuery_default.a.summernote, {
-  ui: bs4_ui
+  ui: bs4_ui,
+  interface: 'bs4'
 });
 external_jQuery_default.a.summernote.options.styleTags = ['p', {
   title: 'Blockquote',
